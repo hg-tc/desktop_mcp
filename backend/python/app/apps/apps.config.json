@@ -1,0 +1,14 @@
+{
+  "apps": [
+    {
+      "id": "xiaohongshu-agent",
+      "name": "小红书 Agent",
+      "description": "智能小红书内容管理和发布助手，支持内容搜索、发布、互动等功能",
+      "version": "1.0.0",
+      "enabled": true,
+      "api_prefix": "/api/apps/xiaohongshu-agent",
+      "file": "xiaohongshu_agent_app.py"
+    }
+  ]
+}
+

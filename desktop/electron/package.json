@@ -1,0 +1,115 @@
+{
+  "name": "xiaohongshu-agent-desktop",
+  "version": "0.1.0",
+  "description": "Electron 桌面应用，封装小红书 MCP Agent 对话体验。",
+  "author": "",
+  "license": "MIT",
+  "main": "dist/main.js",
+  "scripts": {
+    "clean": "rimraf dist release",
+    "dev": "concurrently -k \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:main": "tsup --config tsup.config.ts --watch --env.NODE_ENV=development",
+    "dev:renderer": "vite dev",
+    "dev:electron": "wait-on dist/main.js http://localhost:5173 && cross-env ELECTRON_START_URL=http://localhost:5173 electron .",
+    "build:main": "tsup --config tsup.config.ts",
+    "build:renderer": "vite build",
+    "build:go": "node ./scripts/build-go.js",
+    "build:python": "node ./scripts/build-python.js",
+    "build": "npm run clean && npm run build:go && npm run build:python && npm run build:main && npm run build:renderer && electron-builder",
+    "start": "electron .",
+    "package": "npm run build",
+    "lint": "eslint electron src --ext .ts,.tsx",
+    "lint:fix": "eslint electron src --ext .ts,.tsx --fix",
+    "format": "prettier --write \"electron/**/*.{ts,tsx}\" \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"electron/**/*.{ts,tsx}\" \"src/**/*.{ts,tsx}\"",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.1",
+    "axios": "^1.7.7",
+    "clsx": "^2.1.1",
+    "electron-log": "^5.1.2",
+    "keytar": "^7.9.0",
+    "openai": "^4.58.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.22.0",
+    "lucide-react": "^0.344.0",
+    "react-dropzone": "^14.2.3",
+    "ws": "^8.16.0",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.2",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^7.14.1",
+    "@typescript-eslint/parser": "^7.14.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "eslint": "^8.57.0",
+    "postcss": "^8.4.38",
+    "prettier": "^3.2.5",
+    "rimraf": "^5.0.5",
+    "tailwindcss": "^3.4.7",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.6.3",
+    "tsup": "^8.1.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11",
+    "wait-on": "^7.1.1",
+    "@types/jest": "^29.5.12",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2"
+  },
+  "build": {
+    "appId": "com.xiaohongshu.agent",
+    "productName": "Xiaohongshu Agent",
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "extraResources": [
+      {
+        "from": "dist/bin",
+        "to": "bin"
+      },
+      {
+        "from": "dist/python-backend",
+        "to": "backend/python",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
+  }
+}

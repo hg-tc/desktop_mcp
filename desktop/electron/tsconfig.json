@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": false,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2020"],
+    "noEmit": true,
+    "paths": {
+      "@renderer/*": ["./src/renderer/*"]
+    },
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["node", "electron"]
+  },
+  "include": [
+    "electron",
+    "src",
+    "tsup.config.ts",
+    "vite.config.ts",
+    "tailwind.config.ts"
+  ]
+}
+
