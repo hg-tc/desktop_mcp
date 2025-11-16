@@ -73,49 +73,26 @@ class XiaohongshuAgentApp(BaseApp):
     async def _handle_chat(self, websocket: WebSocket):
         """处理 WebSocket 聊天请求"""
         await websocket.accept()
-        logger.info("=" * 60)
-        logger.info("🔌 小红书 Agent WebSocket 连接建立")
-        logger.info("=" * 60)
+        logger.info("[连接] WebSocket 已建立")
         
-        # 重置 MCP 客户端会话状态（每个 WebSocket 连接都需要新的会话）
         self.mcp_client.reset_session()
         
         try:
-            # 获取 MCP 工具列表（如果失败，使用空列表）
-            logger.info("[初始化] 步骤 1/3: 获取 MCP 工具列表...")
+            # 获取 MCP 工具列表
             try:
                 mcp_tools = await self.mcp_client.list_tools()
-                logger.info(f"[初始化] ✅ 获取到 {len(mcp_tools)} 个 MCP 工具")
-                if mcp_tools:
-                    mcp_tool_names = [tool.get("name", "unknown") for tool in mcp_tools]
-                    logger.info(f"[初始化] MCP 工具名称: {', '.join(mcp_tool_names)}")
             except Exception as e:
-                logger.error(f"[初始化] ❌ 获取 MCP 工具列表失败: {e}", exc_info=True)
-                logger.warning(f"[初始化] ⚠️  将使用空工具列表")
+                logger.error(f"[初始化] MCP 工具获取失败: {e}")
                 mcp_tools = []
             
             # 转换为 LangChain 工具格式
-            logger.info("[初始化] 步骤 2/3: 转换为 LangChain 工具格式...")
             langchain_tools = convert_mcp_tools_to_langchain(mcp_tools, self.mcp_client)
-            logger.info(f"[初始化] ✅ 工具转换完成，LangChain 工具数量: {len(langchain_tools)}")
-            if langchain_tools:
-                langchain_tool_names = [tool.name for tool in langchain_tools]
-                logger.info(f"[初始化] LangChain 工具名称: {', '.join(langchain_tool_names)}")
-            else:
-                logger.warning(f"[初始化] ⚠️  工具转换后列表为空！")
-                logger.warning(f"[初始化] MCP 工具数量: {len(mcp_tools)}")
-                if mcp_tools:
-                    logger.warning(f"[初始化] 可能原因：工具转换失败，请检查 langgraph_tools.py")
             
             # 初始化 LangGraph Agent
-            logger.info("[初始化] 步骤 3/3: 初始化 LangGraph Agent...")
             try:
                 self.langgraph_agent_service.initialize_agent(langchain_tools)
-                logger.info(f"[初始化] ✅ Agent 已初始化，工具数量: {len(langchain_tools)}")
-                logger.info("=" * 60)
             except Exception as e:
-                logger.error(f"[初始化] ❌ Agent 初始化失败: {e}", exc_info=True)
-                logger.info("=" * 60)
+                logger.error(f"[初始化] Agent 初始化失败: {e}", exc_info=True)
                 await websocket.send_json({
                     "type": "error",
                     "error": f"Agent 初始化失败: {str(e)}"
@@ -164,14 +141,6 @@ class XiaohongshuAgentApp(BaseApp):
                                 "error": "LLM API Key 未配置。请在应用设置中配置 OPENAI_API_KEY 环境变量。"
                             })
                             continue
-                        
-                        # 记录 API 配置信息（用于调试）
-                        api_key_preview = settings.OPENAI_API_KEY[:8] + "..." + settings.OPENAI_API_KEY[-4:] if settings.OPENAI_API_KEY and len(settings.OPENAI_API_KEY) > 12 else settings.OPENAI_API_KEY
-                        logger.info(f"[LangGraph] API Key: {api_key_preview}, Base URL: {settings.OPENAI_BASE_URL}, Model: {settings.OPENAI_MODEL}")
-                        logger.info(f"[LangGraph] 工具数量: {len(langchain_tools)}")
-                        if langchain_tools:
-                            tool_names = [tool.name for tool in langchain_tools]
-                            logger.info(f"[LangGraph] 工具名称: {', '.join(tool_names)}")
                         
                         # 使用 LangGraph Agent 处理消息
                         # 定义 WebSocket 发送函数

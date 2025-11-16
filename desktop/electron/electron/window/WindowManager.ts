@@ -38,15 +38,29 @@ export class WindowManager {
       }
     });
 
+    // 过滤 DevTools 的无害警告（Autofill API 等）
+    // 这些错误来自 DevTools 内部，不影响应用功能
+    this.mainWindow.webContents.on('console-message', (event, level, message) => {
+      // 过滤掉 DevTools 内部的 Autofill 相关错误
+      if (
+        typeof message === 'string' &&
+        (message.includes("Autofill.enable") || 
+         message.includes("Autofill.setAddresses") ||
+         message.includes("'Autofill.") ||
+         message.includes("Request Autofill."))
+      ) {
+        // 静默处理，不输出到控制台
+        return;
+      }
+    });
+
     // 加载页面
     if (this.isDev && process.env.ELECTRON_START_URL) {
       await this.mainWindow.loadURL(process.env.ELECTRON_START_URL);
       
-      // 打开 DevTools 前，设置一些选项以减少控制台噪音
-      // 注意：Autofill 相关的错误是 DevTools 内部的正常警告，不影响应用功能
+      // 打开 DevTools
       this.mainWindow.webContents.openDevTools({ 
         mode: 'detach',
-        // 可以在这里添加其他 DevTools 选项
       });
     } else {
       await this.mainWindow.loadFile(path.join(getRendererDistPath(), 'index.html'));

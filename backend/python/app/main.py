@@ -36,15 +36,25 @@ except ImportError as e:
     LLM_WS_AVAILABLE = False
     logger.info(f"LLM WebSocket 服务模块未找到，将仅启动应用系统: {e}")
 
-# 配置日志 - 确保立即输出，不缓冲
+# 配置日志 - 精简输出，只保留基本标志
 import sys
+# 设置日志级别为 WARNING，减少输出
+log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.WARNING)
+if settings.LOG_LEVEL.upper() == "DEBUG":
+    log_level = logging.DEBUG
+elif settings.LOG_LEVEL.upper() == "INFO":
+    log_level = logging.INFO
+
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    stream=sys.stdout,  # 明确指定输出到 stdout
-    force=True  # Python 3.8+ 支持，强制重新配置
+    level=log_level,
+    format="%(levelname)s: %(message)s",  # 精简格式，去掉时间戳和模块名
+    stream=sys.stdout,
+    force=True
 )
+# 禁用 SQLAlchemy 的详细日志
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 # 禁用缓冲
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
@@ -148,18 +158,8 @@ def main():
     sys.stdout.flush()
     sys.stderr.flush()
 
-    logger.info("=" * 60)
-    logger.info("🚀 启动 Python 后端服务")
-    logger.info(f"📍 地址: {settings.HOST}:{settings.PORT}")
-    logger.info(f"💾 数据库: {settings.DATABASE_URL}")
-    logger.info(f"📁 上传目录: {settings.UPLOAD_DIR}")
-    logger.info(f"🔑 OPENAI_API_KEY: {'✅ 已配置' if settings.OPENAI_API_KEY else '❌ 未配置'}")
-    if settings.OPENAI_API_KEY:
-        logger.info(f"   - 长度: {len(settings.OPENAI_API_KEY)}")
-        logger.info(f"   - 前缀: {settings.OPENAI_API_KEY[:15]}...")
-    logger.info(f"🌐 OPENAI_BASE_URL: {settings.OPENAI_BASE_URL}")
-    logger.info(f"🤖 OPENAI_MODEL: {settings.OPENAI_MODEL}")
-    logger.info("=" * 60)
+    # 精简启动信息
+    logger.info(f"🚀 Python 后端启动: {settings.HOST}:{settings.PORT}")
     
     # 再次刷新
     sys.stdout.flush()
@@ -169,8 +169,8 @@ def main():
         app,
         host=settings.HOST,
         port=settings.PORT,
-        log_level=settings.LOG_LEVEL.lower(),
-        access_log=True,
+        log_level="warning",  # 只显示警告和错误（uvicorn 需要小写）
+        access_log=False,  # 禁用访问日志
         # 确保日志立即输出，不缓冲
         log_config=None,  # 使用默认配置，但通过 logging.basicConfig 已配置
     )

@@ -12,6 +12,36 @@ import { logger } from './utils/logger';
  * 应用入口
  */
 async function main() {
+  // 过滤无害的系统警告和 DevTools 警告
+  // 这些错误来自系统底层和 DevTools 内部，不影响应用功能
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk: any, encoding?: any, callback?: any) => {
+    const message = chunk?.toString() || '';
+    
+    // 过滤规则列表
+    const shouldFilter = [
+      // DevTools Autofill 相关错误
+      "Autofill.enable",
+      "Autofill.setAddresses",
+      "'Autofill.",
+      "Request Autofill.",
+      // macOS 输入法系统相关警告
+      "TSM AdjustCapsLockLED",
+      "IMKCFRunLoopWakeUpReliable",
+      "error messaging the mach port",
+      "_ISSetPhysicalKeyboardCapsLockLED",
+    ].some(pattern => message.includes(pattern));
+    
+    if (shouldFilter) {
+      // 静默处理，不输出
+      if (typeof callback === 'function') {
+        callback();
+      }
+      return true;
+    }
+    return originalStderrWrite(chunk, encoding, callback);
+  };
+
   // 初始化日志
   logger.info('Starting application');
 

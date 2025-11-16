@@ -39,7 +39,6 @@ class AppRegistry:
             
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                logger.info(f"加载应用配置: {len(config.get('apps', []))} 个应用")
                 return config
         except Exception as e:
             logger.error(f"加载应用配置失败: {e}")
@@ -58,7 +57,6 @@ class AppRegistry:
         
         for app_config in apps_list:
             if not app_config.get("enabled", True):
-                logger.info(f"跳过未启用的应用: {app_config.get('id')}")
                 continue
             
             try:
@@ -67,42 +65,35 @@ class AppRegistry:
                 api_prefix_config = app_config.get("api_prefix", "")
                 
                 if not app_file:
-                    logger.warning(f"应用 {app_id} 未指定文件，跳过注册")
+                    logger.warning(f"[注册] 应用 {app_id} 未指定文件")
                     continue
                 
-                # 动态导入应用模块
                 module_path = f"app.apps.{app_file.replace('.py', '')}"
-                logger.info(f"导入应用模块: {module_path}")
-                
                 module = importlib.import_module(module_path)
                 
-                # 获取应用实例（假设每个模块有一个 get_app() 函数或 APP 实例）
                 app_instance = None
                 if hasattr(module, "get_app"):
                     app_instance = module.get_app()
                 elif hasattr(module, "APP"):
                     app_instance = module.APP
                 else:
-                    logger.error(f"应用模块 {module_path} 未找到应用实例（需要 get_app() 函数或 APP 实例）")
+                    logger.error(f"[注册] 应用模块 {module_path} 未找到应用实例")
                     continue
                 
-                # 获取路由器
                 router = None
                 if hasattr(app_instance, "get_router"):
                     router = app_instance.get_router()
                 elif hasattr(app_instance, "router"):
                     router = app_instance.router
                 else:
-                    logger.error(f"应用 {app_id} 无法获取路由器（应用实例缺少 get_router() 方法或 router 属性）")
+                    logger.error(f"[注册] 应用 {app_id} 无法获取路由器")
                     continue
                 
                 if router is None or not hasattr(router, "routes"):
-                    logger.error(f"应用 {app_id} 的路由器无效")
+                    logger.error(f"[注册] 应用 {app_id} 的路由器无效")
                     continue
                 
-                # 使用配置的 API 前缀
                 full_prefix = api_prefix_config if api_prefix_config else f"{api_prefix}/apps/{app_id}"
-                
                 app.include_router(router, prefix=full_prefix, tags=[app_config.get("name", app_id)])
                 
                 self.registered_apps[app_id] = {
@@ -112,13 +103,10 @@ class AppRegistry:
                 }
                 
                 registered_count += 1
-                logger.info(f"✅ 成功注册应用: {app_id} ({app_config.get('name')}) - 路由前缀: {full_prefix}")
                 
             except Exception as e:
-                logger.error(f"❌ 注册应用失败 {app_config.get('id')}: {e}", exc_info=True)
+                logger.error(f"[注册] 应用 {app_config.get('id')} 失败: {e}")
                 continue
-        
-        logger.info(f"应用注册完成: 共 {registered_count}/{len(apps_list)} 个应用")
         return registered_count
     
     def get_app_info(self, app_id: str) -> Dict[str, Any]:

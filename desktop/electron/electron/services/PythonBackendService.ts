@@ -105,20 +105,17 @@ export class PythonBackendService extends BaseBackendService {
         // 检查虚拟环境是否存在
         if (fs.existsSync(venvPythonPath)) {
           pythonExecutable = venvPythonPath;
-          log.info(`[PythonBackend] 使用虚拟环境 Python: ${pythonExecutable}`);
         } else if (fs.existsSync(venvPythonPathWin)) {
           pythonExecutable = venvPythonPathWin;
-          log.info(`[PythonBackend] 使用虚拟环境 Python: ${pythonExecutable}`);
         } else {
           // 如果没有虚拟环境，尝试系统 Python
-          log.warn(`[PythonBackend] 虚拟环境不存在，尝试使用系统 Python`);
+          log.warn(`[PythonBackend] 虚拟环境不存在，使用系统 Python`);
           const pythonCommands = ['python3', 'python'];
           for (const cmd of pythonCommands) {
             try {
               const { execSync } = require('child_process');
               execSync(`${cmd} --version`, { stdio: 'ignore' });
               pythonExecutable = cmd;
-              log.info(`[PythonBackend] 使用系统 Python: ${pythonExecutable}`);
               break;
             } catch {
               // 继续尝试下一个
@@ -178,39 +175,25 @@ export class PythonBackendService extends BaseBackendService {
     }
 
     // 传递 API Key（如果 Electron 有配置）
-    // 注意：即使不传递，Python 后端也会从 .env 文件读取
     if (this.options.apiKey) {
       env.OPENAI_API_KEY = this.options.apiKey;
-      log.info('[PythonBackend] API Key 已通过环境变量传递');
-    } else {
-      log.info('[PythonBackend] API Key 未通过环境变量传递，Python 后端将从 .env 文件读取');
     }
     const defaultBaseUrl = 'https://api.openai.com/v1';
     const baseUrlFromOptions = this.options.baseUrl?.trim();
     if (baseUrlFromOptions && baseUrlFromOptions !== defaultBaseUrl) {
       env.OPENAI_BASE_URL = baseUrlFromOptions;
-      log.info(`[PythonBackend] Base URL 通过 Electron 传递: ${baseUrlFromOptions}`);
-    } else if (baseUrlFromOptions) {
-      log.info('[PythonBackend] Base URL 等于默认值，保持由 Python (.env) 决定');
     }
 
     const defaultModel = 'gpt-4o-mini';
     const modelFromOptions = this.options.model?.trim();
     if (modelFromOptions && modelFromOptions !== defaultModel) {
       env.OPENAI_MODEL = modelFromOptions;
-      log.info(`[PythonBackend] Model 通过 Electron 传递: ${modelFromOptions}`);
-    } else if (modelFromOptions) {
-      log.info('[PythonBackend] Model 等于默认值，保持由 Python (.env) 决定');
     }
     if (this.options.headers) {
       env.OPENAI_HEADERS = JSON.stringify(this.options.headers);
     }
 
-    log.info(`[PythonBackend] Launching: ${command} ${args.join(' ')} (cwd: ${cwd})`);
-    console.log(`[🐍 PythonBackend] 启动命令: ${command} ${args.join(' ')}`);
-    console.log(`[🐍 PythonBackend] 工作目录: ${cwd}`);
-    console.log(`[🐍 PythonBackend] API Key (Electron传递): ${this.options.apiKey ? '已设置' : '未设置'}`);
-    console.log(`[🐍 PythonBackend] 提示: 如果 Electron 未传递 API Key，Python 后端会从 .env 文件读取`);
+    log.info(`[PythonBackend] 启动: ${path.basename(command)}`);
 
     const child = spawn(command, args, {
       cwd,
@@ -218,19 +201,19 @@ export class PythonBackendService extends BaseBackendService {
       stdio: ['ignore', 'pipe', 'pipe']
     });
     
-    // 立即输出启动信息
-    console.log(`[🐍 PythonBackend] 进程已启动，PID: ${child.pid}`);
-
-    // 处理输出 - 确保所有输出都被记录
+    // 精简输出处理 - 只显示关键信息
     child.stdout.on('data', (data: Buffer) => {
       const text = data.toString();
-      // 不过滤空行，保留所有输出以便调试
       const lines = text.split(/\r?\n/);
       lines.forEach((line) => {
         const trimmed = line.trim();
-        if (trimmed) {
-          // 使用更明显的标记
-          console.log('[🐍 PythonBackend STDOUT]', trimmed);
+        // 只显示 ERROR 和 WARNING，以及关键启动信息
+        if (trimmed && (
+          trimmed.includes('ERROR') || 
+          trimmed.includes('WARNING') || 
+          trimmed.includes('启动') ||
+          trimmed.includes('错误')
+        )) {
           log.info('[PythonBackend]', trimmed);
         }
       });
@@ -242,16 +225,12 @@ export class PythonBackendService extends BaseBackendService {
       lines.forEach((line) => {
         const trimmed = line.trim();
         if (trimmed) {
-          // 使用更明显的标记
-          console.error('[🐍 PythonBackend STDERR]', trimmed);
           log.error('[PythonBackend]', trimmed);
           
           // 检测端口占用错误
           if (trimmed.includes('address already in use') || trimmed.includes('Errno 48')) {
             const port = this.options.port ?? 18061;
-            log.error(`[PythonBackend] ⚠️ 端口 ${port} 已被占用！`);
-            log.error(`[PythonBackend] 提示: 请关闭占用该端口的进程，或重启应用`);
-            // 尝试查找并提示占用端口的进程
+            log.error(`[PythonBackend] 端口 ${port} 被占用`);
             this.detectPortConflict(port);
           }
         }

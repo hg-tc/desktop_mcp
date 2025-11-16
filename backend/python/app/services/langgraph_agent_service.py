@@ -75,12 +75,11 @@ class LangGraphAgentService:
             tools: LangChain Tool 列表
         """
         if not tools:
-            logger.warning("[LangGraphAgent] ⚠️  没有提供工具，Agent 将无法调用工具")
+            logger.warning("[Agent] 无工具")
             self._tools = []
         else:
             self._tools = tools
-            logger.info(f"[LangGraphAgent] ✅ 初始化 Agent，工具数量: {len(tools)}")
-            logger.info(f"[LangGraphAgent] 工具名称列表: {[tool.name for tool in tools]}")
+            logger.info(f"[Agent] 初始化: {len(tools)} 个工具")
         
         # 创建 LangChain ChatOpenAI 客户端
         # 需要从 LLMClientService 获取配置
@@ -108,124 +107,45 @@ class LangGraphAgentService:
             **model_kwargs
         )
         
-        # 验证 LLM 是否支持工具调用
-        logger.info(f"[LangGraphAgent] LLM 类型: {type(llm)}")
-        logger.info(f"[LangGraphAgent] LLM 模型: {settings.OPENAI_MODEL}")
-        
-        # 手动绑定工具到 LLM（确保工具被正确识别）
-        # 注意：create_react_agent 应该会自动绑定，但某些情况下可能需要手动绑定
+        # 绑定工具到 LLM
         if self._tools:
             try:
-                logger.info(f"[LangGraphAgent] 手动绑定 {len(self._tools)} 个工具到 LLM...")
                 llm_with_tools = llm.bind_tools(self._tools)
-                logger.info(f"[LangGraphAgent] ✅ 工具已绑定到 LLM")
                 llm = llm_with_tools
             except Exception as e:
-                logger.warning(f"[LangGraphAgent] 手动绑定工具失败，将使用原始 LLM: {e}")
-                # 继续使用原始 LLM，让 create_react_agent 处理
-        
-        # 检查工具是否可以被 LLM 识别（测试工具格式）
-        if self._tools:
-            try:
-                # 尝试获取工具的 JSON Schema（用于 function calling）
-                for tool in self._tools:
-                    if hasattr(tool, 'args_schema'):
-                        schema = tool.args_schema.schema() if hasattr(tool.args_schema, 'schema') else None
-                        logger.debug(f"[LangGraphAgent] 工具 {tool.name} 的 Schema: {schema}")
-            except Exception as e:
-                logger.warning(f"[LangGraphAgent] 检查工具 Schema 时出错: {e}")
-        
-        # 记录工具详细信息
-        if self._tools:
-            logger.info(f"[LangGraphAgent] 工具列表:")
-            for i, tool in enumerate(self._tools, 1):
-                logger.info(f"  {i}. {tool.name}: {tool.description[:100]}...")
-                # 检查工具是否有 args_schema
-                if hasattr(tool, 'args_schema') and tool.args_schema:
-                    logger.debug(f"     参数 Schema: {tool.args_schema.schema() if hasattr(tool.args_schema, 'schema') else tool.args_schema}")
-        else:
-            logger.warning("[LangGraphAgent] ⚠️  没有工具传递给 Agent！")
-        
-        # 验证工具格式 - 确保工具可以被 LangChain 识别
-        if self._tools:
-            logger.info(f"[LangGraphAgent] 验证工具格式...")
-            for tool in self._tools:
-                # 检查工具是否有必要的方法
-                if not hasattr(tool, 'name'):
-                    logger.error(f"[LangGraphAgent] 工具缺少 'name' 属性: {tool}")
-                if not hasattr(tool, 'description'):
-                    logger.error(f"[LangGraphAgent] 工具缺少 'description' 属性: {tool}")
-                if not hasattr(tool, 'invoke') and not hasattr(tool, 'ainvoke'):
-                    logger.error(f"[LangGraphAgent] 工具缺少 'invoke' 或 'ainvoke' 方法: {tool}")
-                
-                # 尝试获取工具的 JSON Schema（用于 function calling）
-                try:
-                    if hasattr(tool, 'args_schema') and tool.args_schema:
-                        schema = tool.args_schema.schema() if hasattr(tool.args_schema, 'schema') else None
-                        logger.info(f"[LangGraphAgent] 工具 {tool.name} 的 Schema 类型: {type(schema)}")
-                        if schema:
-                            logger.debug(f"[LangGraphAgent] 工具 {tool.name} 的 Schema: {json.dumps(schema, ensure_ascii=False)[:200]}")
-                except Exception as e:
-                    logger.warning(f"[LangGraphAgent] 获取工具 {tool.name} 的 Schema 时出错: {e}")
+                logger.warning(f"[Agent] 工具绑定失败: {e}")
         
         # 创建 Agent
-        # LangChain 1.0: 使用 create_agent，支持 system_prompt 参数
-        # 向后兼容: 如果使用旧版本，使用 create_react_agent 和 prompt 参数
         try:
-            # 检查 LLM 是否已经绑定了工具
-            if hasattr(llm, 'bound_tools'):
-                logger.info(f"[LangGraphAgent] LLM 已绑定工具，工具数量: {len(llm.bound_tools) if llm.bound_tools else 0}")
-            elif hasattr(llm, 'lc_kwargs') and 'tools' in llm.lc_kwargs:
-                logger.info(f"[LangGraphAgent] LLM 已通过 lc_kwargs 绑定工具")
-            
             if LANGCHAIN_1_0:
-                # LangChain 1.0: 使用 create_agent，传递 system_prompt
-                # 注意：LangChain 1.0 的 create_agent 可能需要不同的参数结构
                 try:
-                    # 尝试使用 system_prompt 参数（LangChain 1.0 标准方式）
                     self._agent = create_agent(
                         model=llm,
                         tools=self._tools if not hasattr(llm, 'bound_tools') else [],
                         system_prompt=self._system_prompt
                     )
-                    logger.info(f"[LangGraphAgent] ✅ Agent 创建成功（LangChain 1.0 模式）")
                 except TypeError:
-                    # 如果 system_prompt 不支持，尝试 prompt 参数
                     try:
                         self._agent = create_agent(
                             model=llm,
                             tools=self._tools if not hasattr(llm, 'bound_tools') else [],
                             prompt=self._system_prompt
                         )
-                        logger.info(f"[LangGraphAgent] ✅ Agent 创建成功（使用 prompt 参数）")
-                    except TypeError as e:
-                        # 如果都不支持，尝试不传递 prompt（使用默认）
-                        logger.warning(f"[LangGraphAgent] ⚠️  system_prompt 和 prompt 参数都不支持，尝试不传递: {e}")
+                    except TypeError:
                         self._agent = create_agent(
                             model=llm,
                             tools=self._tools if not hasattr(llm, 'bound_tools') else []
                         )
-                        logger.info(f"[LangGraphAgent] ✅ Agent 创建成功（使用默认 prompt）")
             else:
-                # 向后兼容：使用 create_react_agent（旧版本）
                 self._agent = create_agent(
                     llm,
                     tools=self._tools if not hasattr(llm, 'bound_tools') else [],
                     prompt=self._system_prompt
                 )
-                logger.info(f"[LangGraphAgent] ✅ Agent 创建成功（向后兼容模式）")
+            logger.info(f"[Agent] 创建成功")
         except Exception as e:
-            logger.error(f"[LangGraphAgent] ❌ Agent 创建失败: {e}", exc_info=True)
+            logger.error(f"[Agent] 创建失败: {e}", exc_info=True)
             raise
-        
-        logger.info(f"[LangGraphAgent] Agent 初始化完成，模型: {settings.OPENAI_MODEL}, Base URL: {settings.OPENAI_BASE_URL}")
-        logger.info(f"[LangGraphAgent] Agent 类型: {type(self._agent)}")
-        
-        # 验证 Agent 的图结构
-        if hasattr(self._agent, 'nodes'):
-            logger.info(f"[LangGraphAgent] Agent 节点: {list(self._agent.nodes.keys())}")
-        if hasattr(self._agent, 'edges'):
-            logger.debug(f"[LangGraphAgent] Agent 边: {list(self._agent.edges)}")
     
     async def stream_agent_response(
         self,
@@ -242,22 +162,15 @@ class LangGraphAgentService:
         if not self._agent:
             raise RuntimeError("Agent 未初始化，请先调用 initialize_agent()")
         
-        # 检查工具列表
         if not self._tools:
-            logger.warning(f"[LangGraphAgent] ⚠️  工具列表为空！无法执行工具调用。")
-            logger.warning(f"[LangGraphAgent] 请确保在调用 stream_agent_response 之前已正确初始化 Agent 并传入工具列表。")
+            logger.warning("[Agent] 工具列表为空")
             await websocket_send_func({
                 "type": "error",
                 "error": "工具列表为空，无法执行工具调用。请检查 Agent 初始化。"
             })
             return
         
-        logger.info(f"[LangGraphAgent] 当前工具列表: {[tool.name for tool in self._tools]}")
-        
-        # 转换消息格式为 LangChain 消息
         langchain_messages = self._convert_messages_to_langchain(messages)
-        
-        logger.debug(f"[LangGraphAgent] 开始执行 Agent，消息数量: {len(langchain_messages)}")
         
         # 使用 astream_events 获取流式响应
         # 支持多轮交互：如果检测到 JSON 文本，执行工具后继续 Agent 循环
@@ -268,104 +181,63 @@ class LangGraphAgentService:
         
         while iteration < max_iterations:
             iteration += 1
-            logger.info(f"[LangGraphAgent] 开始第 {iteration} 轮 Agent 执行...")
-            
             try:
-                event_count = 0
                 tool_call_events = []
-                last_output = None  # 存储最后一次 LLM 输出
+                last_output = None
                 
-                # 只处理重要的事件类型，过滤掉大量调试事件
                 important_event_types = {
-                    "on_chat_model_stream",  # LLM 流式输出
-                    "on_chat_model_end",     # LLM 输出完成
-                    "on_tool_start",         # 工具开始
-                    "on_tool_end",           # 工具结束
-                    "on_tool_error",         # 工具错误
-                    "on_chain_end",          # Agent 完成
-                    "on_chain_error"         # Agent 错误
+                    "on_chat_model_stream",
+                    "on_chat_model_end",
+                    "on_tool_start",
+                    "on_tool_end",
+                    "on_tool_error",
+                    "on_chain_end",
+                    "on_chain_error"
                 }
                 
-                # LangChain 1.0: astream_events 的 API 应该保持兼容
-                # 输入格式仍然是 {"messages": current_messages}
                 async for event in self._agent.astream_events(
                     {"messages": current_messages},
                     version="v2"
                 ):
                     event_type = event.get("event", "")
-                    event_name = event.get("name", "")
-                    
-                    # 只处理重要事件，跳过大量调试事件（如 on_chain_start, on_chain_stream 等）
                     if event_type not in important_event_types:
-                        # 只记录关键节点的事件
-                        if event_type == "on_chain_start" and "agent" in event_name.lower():
-                            logger.debug(f"[LangGraphAgent] Agent 开始执行: {event_name}")
                         continue
                     
-                    event_count += 1
-                    
-                    # 特别关注工具相关事件
                     if event_type in ["on_tool_start", "on_tool_end", "on_tool_error"]:
                         tool_call_events.append(event_type)
-                        logger.info(f"[LangGraphAgent] 🔧 工具事件 #{event_count}: type={event_type}, name={event_name}")
                     
-                    # 保存最后一次 LLM 输出，用于检测 JSON
                     if event_type == "on_chat_model_end":
                         last_output = event.get("data", {}).get("output")
                     
-                    # 只记录重要事件的详细信息
-                    if event_type in ["on_tool_start", "on_tool_end", "on_chat_model_end", "on_chain_end"]:
-                        logger.debug(f"[LangGraphAgent] 事件 #{event_count}: type={event_type}, name={event_name}")
-                    
                     await self._handle_event(event, websocket_send_func)
                 
-                # 检查是否有工具调用
                 if tool_call_events:
-                    logger.info(f"[LangGraphAgent] ✅ 检测到 {len(tool_call_events)} 个工具调用事件")
-                    # 有工具调用，继续下一轮（Agent 会自动处理工具结果）
                     break
                 
-                # 如果没有工具调用，检查是否返回了 JSON 文本
                 if last_output:
                     content = getattr(last_output, "content", None) or (last_output.get("content") if isinstance(last_output, dict) else None)
                     if content and isinstance(content, str) and content.strip().startswith("{"):
-                        logger.warning(f"[LangGraphAgent] ⚠️  第 {iteration} 轮：LLM 返回了 JSON 文本而不是 tool_calls")
-                        logger.info(f"[LangGraphAgent] 🔄 尝试解析 JSON 并转换为工具调用...")
-                        
-                        # 尝试解析 JSON 并执行工具
                         json_tool_result = await self._parse_and_execute_json_tool(content, websocket_send_func)
-                        
                         if json_tool_result:
-                            # 工具执行成功，将结果添加到消息中，继续下一轮
                             from langchain_core.messages import ToolMessage
                             tool_message = ToolMessage(
                                 content=json_tool_result.get("content", ""),
                                 tool_call_id=f"json_tool_{iteration}"
                             )
                             current_messages = list(current_messages) + [tool_message]
-                            logger.info(f"[LangGraphAgent] ✅ 工具执行成功，继续第 {iteration + 1} 轮 Agent 执行...")
-                            continue  # 继续下一轮
-                        else:
-                            # 无法解析或执行工具，结束
-                            logger.warning(f"[LangGraphAgent] ⚠️  无法从 JSON 解析工具调用，结束 Agent 执行")
-                            break
-                
-                # 没有工具调用，也没有 JSON，正常结束
-                logger.info(f"[LangGraphAgent] Agent 执行完成（无工具调用）")
+                            continue
                 break
                 
             except Exception as e:
-                logger.error(f"[LangGraphAgent] Agent 执行失败: {e}", exc_info=True)
+                logger.error(f"[Agent] 执行失败: {e}", exc_info=True)
                 await websocket_send_func({
                     "type": "error",
                     "error": f"Agent 执行失败: {str(e)}"
                 })
                 raise
-            
-            logger.info(f"[LangGraphAgent] 第 {iteration} 轮执行完成，共处理 {event_count} 个事件")
         
         if iteration >= max_iterations:
-            logger.warning(f"[LangGraphAgent] ⚠️  达到最大迭代次数 {max_iterations}，停止执行")
+            logger.warning(f"[Agent] 达到最大迭代次数")
     
     def _convert_messages_to_langchain(
         self,
@@ -426,27 +298,7 @@ class LangGraphAgentService:
         event_name = event.get("event", "")
         event_data = event.get("data", {})
         
-        # 记录所有事件类型用于调试
-        if event_name not in ["on_chat_model_stream", "on_tool_start", "on_tool_end", "on_chain_end", "on_chain_error", "on_chat_model_end"]:
-            logger.debug(f"[LangGraphAgent] 未处理的事件类型: {event_name}, 完整事件: {json.dumps(event, default=str, ensure_ascii=False)[:500]}")
-        
         try:
-            if event_name == "on_chat_model_end":
-                # LLM 响应完成，检查是否有 tool_calls
-                output = event_data.get("output")
-                if output:
-                    # 检查是否有 tool_calls
-                    if hasattr(output, "tool_calls") and output.tool_calls:
-                        logger.info(f"[LangGraphAgent] ✅ 检测到 tool_calls: {output.tool_calls}")
-                    elif isinstance(output, dict) and "tool_calls" in output:
-                        logger.info(f"[LangGraphAgent] ✅ 检测到 tool_calls: {output['tool_calls']}")
-                    elif hasattr(output, "additional_kwargs") and output.additional_kwargs.get("tool_calls"):
-                        logger.info(f"[LangGraphAgent] ✅ 检测到 tool_calls (在 additional_kwargs 中): {output.additional_kwargs['tool_calls']}")
-                    else:
-                        # 检查响应内容 - JSON 文本的处理已在 stream_agent_response 中统一处理
-                        content = getattr(output, "content", None) or (output.get("content") if isinstance(output, dict) else None)
-                        if content and isinstance(content, str) and content.strip().startswith("{"):
-                            logger.debug(f"[LangGraphAgent] 检测到 JSON 文本（将在 stream_agent_response 中处理）: {content[:100]}...")
             
             if event_name == "on_chat_model_stream":
                 # LLM 流式输出
@@ -469,19 +321,14 @@ class LangGraphAgentService:
                         })
             
             elif event_name == "on_tool_start":
-                # 工具开始执行
                 tool_name = event.get("name", "")
                 tool_input = event_data.get("input", {})
-                
-                # 如果 input 是字符串，尝试解析为 JSON
                 if isinstance(tool_input, str):
                     try:
                         tool_input = json.loads(tool_input)
                     except:
                         pass
-                
-                logger.info(f"[LangGraphAgent] 工具开始执行: {tool_name}, 参数: {json.dumps(tool_input, ensure_ascii=False)}")
-                
+                logger.info(f"[Agent] 工具: {tool_name}")
                 await websocket_send_func({
                     "type": "tool_call",
                     "tool_name": tool_name,
@@ -489,54 +336,37 @@ class LangGraphAgentService:
                 })
             
             elif event_name == "on_tool_end":
-                # 工具执行完成
                 tool_name = event.get("name", "")
                 tool_output = event_data.get("output", "")
                 output_str = str(tool_output)
-                output_length = len(output_str)
-                
-                logger.info(f"[LangGraphAgent] 工具执行完成: {tool_name}, 结果长度: {output_length}")
-                
-                # 如果输出太大，截断并提示
-                max_output_length = 10000  # 最大输出长度（10KB）
-                if output_length > max_output_length:
-                    logger.warning(f"[LangGraphAgent] ⚠️  工具输出过大 ({output_length} 字符)，将截断到 {max_output_length} 字符")
-                    truncated_output = output_str[:max_output_length] + f"\n\n... (已截断，原始长度: {output_length} 字符)"
+                max_output_length = 10000
+                if len(output_str) > max_output_length:
+                    truncated_output = output_str[:max_output_length] + f"\n\n... (已截断)"
                 else:
                     truncated_output = output_str
-                
-                # 发送工具结果（可选，前端可能不需要）
                 await websocket_send_func({
                     "type": "tool_call",
                     "tool_name": tool_name,
                     "result": {
                         "success": True,
                         "content": truncated_output,
-                        "truncated": output_length > max_output_length,
-                        "original_length": output_length
+                        "truncated": len(output_str) > max_output_length
                     }
                 })
             
             elif event_name == "on_chain_end":
-                # Agent 执行完成
-                logger.debug("[LangGraphAgent] Agent 执行完成")
-                await websocket_send_func({
-                    "type": "done"
-                })
+                await websocket_send_func({"type": "done"})
             
             elif event_name == "on_chain_error":
-                # Agent 执行出错
                 error = event_data.get("error", "未知错误")
-                logger.error(f"[LangGraphAgent] Agent 执行出错: {error}")
+                logger.error(f"[Agent] 错误: {error}")
                 await websocket_send_func({
                     "type": "error",
                     "error": str(error)
                 })
             
-            # 忽略其他事件类型（如 on_chain_start 等）
-            
         except Exception as e:
-            logger.error(f"[LangGraphAgent] 处理事件失败: {e}, 事件: {event_name}", exc_info=True)
+            logger.error(f"[Agent] 事件处理失败: {e}")
     
     async def _parse_and_execute_json_tool(
         self,
@@ -570,36 +400,22 @@ class LangGraphAgentService:
                 tool_args = {"keyword": json_data["query"]}
             
             if tool_name:
-                # 检查工具是否存在
                 available_tool_names = [tool.name for tool in self._tools]
-                logger.info(f"[LangGraphAgent] 推断的工具名称: {tool_name}")
-                logger.info(f"[LangGraphAgent] 可用工具列表: {available_tool_names}")
-                
                 if tool_name in available_tool_names:
-                    logger.info(f"[LangGraphAgent] ✅ 从 JSON 推断出工具调用: {tool_name} with args: {tool_args}")
-                    # 执行工具
                     result = await self._execute_tool_from_json(tool_name, tool_args, websocket_send_func)
                     return result
                 else:
-                    logger.warning(f"[LangGraphAgent] ⚠️  推断的工具名称 '{tool_name}' 不在可用工具列表中")
-                    logger.warning(f"[LangGraphAgent] 可用工具: {available_tool_names}")
-                    # 尝试模糊匹配（例如 search_feeds vs searchFeeds）
+                    # 尝试模糊匹配
                     for available_tool in self._tools:
                         if available_tool.name.lower() == tool_name.lower() or \
                            available_tool.name.replace("_", "").lower() == tool_name.replace("_", "").lower():
-                            logger.info(f"[LangGraphAgent] 🔄 找到模糊匹配的工具: {available_tool.name}")
                             result = await self._execute_tool_from_json(available_tool.name, tool_args, websocket_send_func)
                             return result
-            else:
-                logger.warning(f"[LangGraphAgent] ⚠️  无法从 JSON 推断出工具名称: {json_data}")
-                logger.info(f"[LangGraphAgent] JSON 键: {list(json_data.keys())}")
-                logger.info(f"[LangGraphAgent] 可用工具: {[tool.name for tool in self._tools]}")
-                return None
-        except json.JSONDecodeError as e:
-            logger.warning(f"[LangGraphAgent] ⚠️  JSON 解析失败: {e}")
+            return None
+        except json.JSONDecodeError:
             return None
         except Exception as e:
-            logger.error(f"[LangGraphAgent] ❌ 处理 JSON 工具调用时出错: {e}", exc_info=True)
+            logger.error(f"[Agent] JSON 工具调用失败: {e}")
             return None
     
     async def _execute_tool_from_json(
@@ -628,22 +444,18 @@ class LangGraphAgentService:
                     break
             
             if not tool:
-                logger.error(f"[LangGraphAgent] ❌ 找不到工具: {tool_name}")
+                logger.error(f"[Agent] 工具不存在: {tool_name}")
                 await websocket_send_func({
                     "type": "error",
                     "error": f"找不到工具: {tool_name}"
                 })
                 return None
             
-            # 发送工具调用开始事件
             await websocket_send_func({
                 "type": "tool_call",
                 "tool_name": tool_name,
                 "arguments": tool_args
             })
-            
-            # 执行工具
-            logger.info(f"[LangGraphAgent] 🔧 执行工具: {tool_name}, 参数: {json.dumps(tool_args, ensure_ascii=False)}")
             
             if hasattr(tool, "ainvoke"):
                 result = await tool.ainvoke(tool_args)
@@ -652,7 +464,6 @@ class LangGraphAgentService:
             else:
                 raise ValueError(f"工具 {tool_name} 没有 invoke 或 ainvoke 方法")
             
-            # 发送工具执行完成事件
             await websocket_send_func({
                 "type": "tool_call",
                 "tool_name": tool_name,
@@ -662,13 +473,10 @@ class LangGraphAgentService:
                 }
             })
             
-            logger.info(f"[LangGraphAgent] ✅ 工具执行完成: {tool_name}, 结果长度: {len(str(result))}")
-            
-            # 返回结果，供 Agent 继续处理
             return {"content": str(result)}
             
         except Exception as e:
-            logger.error(f"[LangGraphAgent] ❌ 工具执行失败: {tool_name}, 错误: {e}", exc_info=True)
+            logger.error(f"[Agent] 工具执行失败: {tool_name}: {e}")
             await websocket_send_func({
                 "type": "tool_call",
                 "tool_name": tool_name,
