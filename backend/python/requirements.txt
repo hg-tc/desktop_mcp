@@ -25,9 +25,12 @@ pandas>=2.0.0  # 数据处理
 openai>=1.0.0
 
 # LangGraph 和 LangChain（用于 Agent 工具调用）
-langgraph>=0.2.0
-langchain-core>=0.3.0
-langchain-openai>=0.2.0
+# 注意：LangChain 1.0 和 LangGraph 1.0 需要 Python 3.10+
+# 如果使用 Python 3.9，请使用 0.x 版本
+langgraph>=1.0.0
+langchain>=1.0.0
+langchain-core>=1.0.0
+langchain-openai>=1.0.0
 
 # 其他工具
 python-multipart>=0.0.6  # 文件上传支持

@@ -42,6 +42,16 @@ export class PythonBackendService extends BaseBackendService {
   }
 
   protected async spawnProcess(): Promise<ChildProcessWithoutNullStreams> {
+    // 先获取后端路径（在整个函数中都需要使用）
+    let backendPath = this.options.workingDirectory;
+    if (!backendPath) {
+      if (app.isPackaged) {
+        backendPath = path.join(process.resourcesPath, 'backend', 'python');
+      } else {
+        backendPath = path.resolve(__dirname, '..', '..', '..', 'backend', 'python');
+      }
+    }
+    
     // 获取 Python 可执行文件
     let pythonExecutable = this.options.executablePath;
     if (!pythonExecutable) {
@@ -50,7 +60,7 @@ export class PythonBackendService extends BaseBackendService {
         pythonExecutable = envPython;
       } else if (app.isPackaged) {
         // 打包环境：优先使用虚拟环境中的 Python
-        const pythonBackendPath = path.join(process.resourcesPath, 'backend', 'python');
+        const pythonBackendPath = backendPath;
         const pythonInfoPath = path.join(pythonBackendPath, 'python-info.json');
         
         if (fs.existsSync(pythonInfoPath)) {
@@ -88,16 +98,31 @@ export class PythonBackendService extends BaseBackendService {
           }
         }
       } else {
-        // 开发环境：尝试系统 Python
-        const pythonCommands = ['python3', 'python'];
-        for (const cmd of pythonCommands) {
-          try {
-            const { execSync } = require('child_process');
-            execSync(`${cmd} --version`, { stdio: 'ignore' });
-            pythonExecutable = cmd;
-            break;
-          } catch {
-            // 继续尝试下一个
+        // 开发环境：优先使用虚拟环境中的 Python
+        const venvPythonPath = path.join(backendPath, 'venv', 'bin', 'python');
+        const venvPythonPathWin = path.join(backendPath, 'venv', 'Scripts', 'python.exe');
+        
+        // 检查虚拟环境是否存在
+        if (fs.existsSync(venvPythonPath)) {
+          pythonExecutable = venvPythonPath;
+          log.info(`[PythonBackend] 使用虚拟环境 Python: ${pythonExecutable}`);
+        } else if (fs.existsSync(venvPythonPathWin)) {
+          pythonExecutable = venvPythonPathWin;
+          log.info(`[PythonBackend] 使用虚拟环境 Python: ${pythonExecutable}`);
+        } else {
+          // 如果没有虚拟环境，尝试系统 Python
+          log.warn(`[PythonBackend] 虚拟环境不存在，尝试使用系统 Python`);
+          const pythonCommands = ['python3', 'python'];
+          for (const cmd of pythonCommands) {
+            try {
+              const { execSync } = require('child_process');
+              execSync(`${cmd} --version`, { stdio: 'ignore' });
+              pythonExecutable = cmd;
+              log.info(`[PythonBackend] 使用系统 Python: ${pythonExecutable}`);
+              break;
+            } catch {
+              // 继续尝试下一个
+            }
           }
         }
       }
@@ -105,16 +130,6 @@ export class PythonBackendService extends BaseBackendService {
 
     if (!pythonExecutable) {
       throw new Error('未找到 Python 可执行文件，请确保已安装 Python 3.10+');
-    }
-
-    // 获取后端路径
-    let backendPath = this.options.workingDirectory;
-    if (!backendPath) {
-      if (app.isPackaged) {
-        backendPath = path.join(process.resourcesPath, 'backend', 'python');
-      } else {
-        backendPath = path.resolve(__dirname, '..', '..', '..', 'backend', 'python');
-      }
     }
 
     // 优先使用 app/main.py（新的应用系统入口）

@@ -5,7 +5,6 @@ import json
 import logging
 from typing import Dict, List, Any, Optional
 from langchain_core.tools import tool, BaseTool, StructuredTool
-from langchain_core.callbacks import CallbackManagerForToolRun
 from pydantic import BaseModel, Field
 
 from app.services.mcp_client import McpClient

@@ -1,11 +1,22 @@
 """
 LangGraph Agent 服务
-使用 LangGraph 的 create_react_agent 自动处理工具调用
+使用 LangChain 1.0 的 create_agent 自动处理工具调用
 """
 import json
 import logging
 from typing import Dict, List, Any, Optional
-from langgraph.prebuilt import create_react_agent
+try:
+    # LangChain 1.0: 尝试从 langchain.agents 导入 create_agent
+    from langchain.agents import create_agent
+    LANGCHAIN_1_0 = True
+except ImportError:
+    # 向后兼容：如果不存在，尝试使用 langgraph.prebuilt
+    try:
+        from langgraph.prebuilt import create_react_agent as create_agent
+        LANGCHAIN_1_0 = False
+    except ImportError:
+        raise ImportError("无法导入 create_agent 或 create_react_agent，请检查 LangChain/LangGraph 版本")
+
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -158,9 +169,8 @@ class LangGraphAgentService:
                     logger.warning(f"[LangGraphAgent] 获取工具 {tool.name} 的 Schema 时出错: {e}")
         
         # 创建 Agent
-        # 注意：create_react_agent 使用 prompt 参数而不是 state_modifier
-        # 重要：如果已经手动绑定了工具，create_react_agent 会使用绑定后的 LLM
-        # 如果没有手动绑定，create_react_agent 会自动绑定工具
+        # LangChain 1.0: 使用 create_agent，支持 system_prompt 参数
+        # 向后兼容: 如果使用旧版本，使用 create_react_agent 和 prompt 参数
         try:
             # 检查 LLM 是否已经绑定了工具
             if hasattr(llm, 'bound_tools'):
@@ -168,12 +178,42 @@ class LangGraphAgentService:
             elif hasattr(llm, 'lc_kwargs') and 'tools' in llm.lc_kwargs:
                 logger.info(f"[LangGraphAgent] LLM 已通过 lc_kwargs 绑定工具")
             
-            self._agent = create_react_agent(
-                llm,
-                tools=self._tools if not hasattr(llm, 'bound_tools') else [],  # 如果已绑定，不再传递 tools
-                prompt=self._system_prompt
-            )
-            logger.info(f"[LangGraphAgent] ✅ Agent 创建成功")
+            if LANGCHAIN_1_0:
+                # LangChain 1.0: 使用 create_agent，传递 system_prompt
+                # 注意：LangChain 1.0 的 create_agent 可能需要不同的参数结构
+                try:
+                    # 尝试使用 system_prompt 参数（LangChain 1.0 标准方式）
+                    self._agent = create_agent(
+                        model=llm,
+                        tools=self._tools if not hasattr(llm, 'bound_tools') else [],
+                        system_prompt=self._system_prompt
+                    )
+                    logger.info(f"[LangGraphAgent] ✅ Agent 创建成功（LangChain 1.0 模式）")
+                except TypeError:
+                    # 如果 system_prompt 不支持，尝试 prompt 参数
+                    try:
+                        self._agent = create_agent(
+                            model=llm,
+                            tools=self._tools if not hasattr(llm, 'bound_tools') else [],
+                            prompt=self._system_prompt
+                        )
+                        logger.info(f"[LangGraphAgent] ✅ Agent 创建成功（使用 prompt 参数）")
+                    except TypeError as e:
+                        # 如果都不支持，尝试不传递 prompt（使用默认）
+                        logger.warning(f"[LangGraphAgent] ⚠️  system_prompt 和 prompt 参数都不支持，尝试不传递: {e}")
+                        self._agent = create_agent(
+                            model=llm,
+                            tools=self._tools if not hasattr(llm, 'bound_tools') else []
+                        )
+                        logger.info(f"[LangGraphAgent] ✅ Agent 创建成功（使用默认 prompt）")
+            else:
+                # 向后兼容：使用 create_react_agent（旧版本）
+                self._agent = create_agent(
+                    llm,
+                    tools=self._tools if not hasattr(llm, 'bound_tools') else [],
+                    prompt=self._system_prompt
+                )
+                logger.info(f"[LangGraphAgent] ✅ Agent 创建成功（向后兼容模式）")
         except Exception as e:
             logger.error(f"[LangGraphAgent] ❌ Agent 创建失败: {e}", exc_info=True)
             raise
@@ -246,6 +286,8 @@ class LangGraphAgentService:
                     "on_chain_error"         # Agent 错误
                 }
                 
+                # LangChain 1.0: astream_events 的 API 应该保持兼容
+                # 输入格式仍然是 {"messages": current_messages}
                 async for event in self._agent.astream_events(
                     {"messages": current_messages},
                     version="v2"
