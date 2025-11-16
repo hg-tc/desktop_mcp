@@ -18,7 +18,13 @@ except ImportError:
         raise ImportError("无法导入 create_agent 或 create_react_agent，请检查 LangChain/LangGraph 版本")
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool
 
 from app.core.config import settings
@@ -36,6 +42,7 @@ class LangGraphAgentService:
         self._agent = None
         self._tools: List[BaseTool] = []
         self._llm_client_service = get_llm_client_service()
+        self._tools_signature: Optional[str] = None
         self._system_prompt = """你是一个智能小红书内容助手，可以帮助用户搜索、浏览和管理小红书内容。
 
 重要：当用户询问任何需要实时信息、搜索内容、查看详情、发布内容等操作时，你必须使用可用的工具来完成这些任务。不要告诉用户你无法执行，而是直接调用相应的工具。
@@ -74,75 +81,48 @@ class LangGraphAgentService:
         Args:
             tools: LangChain Tool 列表
         """
-        if not tools:
+        self._tools = tools or []
+        tools_signature = ",".join(sorted(tool.name for tool in self._tools))
+        if self._agent is not None and tools_signature == getattr(self, "_tools_signature", None):
+            logger.info("[Agent] 已使用相同工具初始化，跳过重建")
+            return
+        self._tools_signature = tools_signature
+        if not self._tools:
             logger.warning("[Agent] 无工具")
-            self._tools = []
-        else:
-            self._tools = tools
-            logger.info(f"[Agent] 初始化: {len(tools)} 个工具")
         
-        # 创建 LangChain ChatOpenAI 客户端
-        # 需要从 LLMClientService 获取配置
         llm_service = get_llm_client_service()
         headers = llm_service.get_headers()
-        
-        # 构建 ChatOpenAI 客户端
-        # LangChain 的 ChatOpenAI 支持自定义 headers
-        model_kwargs = {}
-        if headers:
-            model_kwargs["default_headers"] = headers
-        
-        # 获取 API Key（如果使用标准 Authorization，则直接传递）
         api_key = settings.OPENAI_API_KEY
         if not api_key:
             raise ValueError("OPENAI_API_KEY 未配置")
         
-        # 创建 ChatOpenAI 实例
+        model_kwargs: Dict[str, Any] = {}
+        if headers:
+            model_kwargs["default_headers"] = headers
+        
         llm = ChatOpenAI(
             model=settings.OPENAI_MODEL,
             base_url=settings.OPENAI_BASE_URL,
             api_key=api_key,
             temperature=0.3,
             timeout=settings.LLM_REQUEST_TIMEOUT,
-            **model_kwargs
+            **model_kwargs,
         )
         
-        # 绑定工具到 LLM
-        if self._tools:
-            try:
-                llm_with_tools = llm.bind_tools(self._tools)
-                llm = llm_with_tools
-            except Exception as e:
-                logger.warning(f"[Agent] 工具绑定失败: {e}")
-        
-        # 创建 Agent
         try:
             if LANGCHAIN_1_0:
-                try:
-                    self._agent = create_agent(
-                        model=llm,
-                        tools=self._tools if not hasattr(llm, 'bound_tools') else [],
-                        system_prompt=self._system_prompt
-                    )
-                except TypeError:
-                    try:
-                        self._agent = create_agent(
-                            model=llm,
-                            tools=self._tools if not hasattr(llm, 'bound_tools') else [],
-                            prompt=self._system_prompt
-                        )
-                    except TypeError:
-                        self._agent = create_agent(
-                            model=llm,
-                            tools=self._tools if not hasattr(llm, 'bound_tools') else []
-                        )
+                self._agent = create_agent(
+                    model=llm,
+                    tools=self._tools,
+                    system_prompt=self._system_prompt,
+                )
             else:
                 self._agent = create_agent(
                     llm,
-                    tools=self._tools if not hasattr(llm, 'bound_tools') else [],
-                    prompt=self._system_prompt
+                    tools=self._tools,
+                    prompt=self._system_prompt,
                 )
-            logger.info(f"[Agent] 创建成功")
+            logger.info("[Agent] 创建成功")
         except Exception as e:
             logger.error(f"[Agent] 创建失败: {e}", exc_info=True)
             raise
@@ -172,72 +152,24 @@ class LangGraphAgentService:
         
         langchain_messages = self._convert_messages_to_langchain(messages)
         
-        # 使用 astream_events 获取流式响应
-        # 支持多轮交互：如果检测到 JSON 文本，执行工具后继续 Agent 循环
-        max_iterations = 5  # 最大迭代次数，避免无限循环
-        iteration = 0
-        current_messages = langchain_messages
-        json_tool_result = None  # 存储从 JSON 解析的工具执行结果
-        
-        while iteration < max_iterations:
-            iteration += 1
-            try:
-                tool_call_events = []
-                last_output = None
-                
-                important_event_types = {
-                    "on_chat_model_stream",
-                    "on_chat_model_end",
-                    "on_tool_start",
-                    "on_tool_end",
-                    "on_tool_error",
-                    "on_chain_end",
-                    "on_chain_error"
-                }
-                
-                async for event in self._agent.astream_events(
-                    {"messages": current_messages},
-                    version="v2"
-                ):
-                    event_type = event.get("event", "")
-                    if event_type not in important_event_types:
-                        continue
-                    
-                    if event_type in ["on_tool_start", "on_tool_end", "on_tool_error"]:
-                        tool_call_events.append(event_type)
-                    
-                    if event_type == "on_chat_model_end":
-                        last_output = event.get("data", {}).get("output")
-                    
-                    await self._handle_event(event, websocket_send_func)
-                
-                if tool_call_events:
-                    break
-                
-                if last_output:
-                    content = getattr(last_output, "content", None) or (last_output.get("content") if isinstance(last_output, dict) else None)
-                    if content and isinstance(content, str) and content.strip().startswith("{"):
-                        json_tool_result = await self._parse_and_execute_json_tool(content, websocket_send_func)
-                        if json_tool_result:
-                            from langchain_core.messages import ToolMessage
-                            tool_message = ToolMessage(
-                                content=json_tool_result.get("content", ""),
-                                tool_call_id=f"json_tool_{iteration}"
-                            )
-                            current_messages = list(current_messages) + [tool_message]
-                            continue
-                break
-                
-            except Exception as e:
-                logger.error(f"[Agent] 执行失败: {e}", exc_info=True)
-                await websocket_send_func({
-                    "type": "error",
-                    "error": f"Agent 执行失败: {str(e)}"
-                })
-                raise
-        
-        if iteration >= max_iterations:
-            logger.warning(f"[Agent] 达到最大迭代次数")
+        sent_done = False
+        try:
+            async for event in self._agent.astream_events(
+                {"messages": langchain_messages},
+                version="v1",
+            ):
+                if await self._handle_event(event, websocket_send_func):
+                    sent_done = True
+        except Exception as e:
+            logger.error(f"[Agent] 执行失败: {e}", exc_info=True)
+            await websocket_send_func({
+                "type": "error",
+                "error": f"Agent 执行失败: {str(e)}"
+            })
+            raise
+        finally:
+            if not sent_done:
+                await websocket_send_func({"type": "done"})
     
     def _convert_messages_to_langchain(
         self,
@@ -287,7 +219,7 @@ class LangGraphAgentService:
         self,
         event: Dict[str, Any],
         websocket_send_func
-    ) -> None:
+    ) -> bool:
         """
         处理 LangGraph 事件并发送到 WebSocket
         
@@ -297,6 +229,7 @@ class LangGraphAgentService:
         """
         event_name = event.get("event", "")
         event_data = event.get("data", {})
+        sent_done = False
         
         try:
             
@@ -356,6 +289,7 @@ class LangGraphAgentService:
             
             elif event_name == "on_chain_end":
                 await websocket_send_func({"type": "done"})
+                sent_done = True
             
             elif event_name == "on_chain_error":
                 error = event_data.get("error", "未知错误")
@@ -367,126 +301,9 @@ class LangGraphAgentService:
             
         except Exception as e:
             logger.error(f"[Agent] 事件处理失败: {e}")
-    
-    async def _parse_and_execute_json_tool(
-        self,
-        json_content: str,
-        websocket_send_func
-    ) -> Optional[Dict[str, Any]]:
-        """
-        解析 JSON 文本并执行工具调用（用于不支持 function calling 的 LLM）
         
-        Args:
-            json_content: JSON 文本内容
-            websocket_send_func: WebSocket 发送函数
-            
-        Returns:
-            工具执行结果，如果成功返回 {"content": "..."}，失败返回 None
-        """
-        try:
-            json_data = json.loads(json_content.strip())
-            # 根据 JSON 内容推断应该调用哪个工具
-            tool_name = None
-            tool_args = {}
-            
-            if "keyword" in json_data:
-                tool_name = "search_feeds"
-                tool_args = {"keyword": json_data["keyword"]}
-            elif "feed_id" in json_data:
-                tool_name = "get_feed_detail"
-                tool_args = {"feed_id": json_data["feed_id"]}
-            elif "query" in json_data:
-                tool_name = "search_feeds"
-                tool_args = {"keyword": json_data["query"]}
-            
-            if tool_name:
-                available_tool_names = [tool.name for tool in self._tools]
-                if tool_name in available_tool_names:
-                    result = await self._execute_tool_from_json(tool_name, tool_args, websocket_send_func)
-                    return result
-                else:
-                    # 尝试模糊匹配
-                    for available_tool in self._tools:
-                        if available_tool.name.lower() == tool_name.lower() or \
-                           available_tool.name.replace("_", "").lower() == tool_name.replace("_", "").lower():
-                            result = await self._execute_tool_from_json(available_tool.name, tool_args, websocket_send_func)
-                            return result
-            return None
-        except json.JSONDecodeError:
-            return None
-        except Exception as e:
-            logger.error(f"[Agent] JSON 工具调用失败: {e}")
-            return None
+        return sent_done
     
-    async def _execute_tool_from_json(
-        self,
-        tool_name: str,
-        tool_args: Dict[str, Any],
-        websocket_send_func
-    ) -> Optional[Dict[str, Any]]:
-        """
-        从 JSON 解析的工具调用手动执行工具（用于不支持 function calling 的 LLM）
-        
-        Args:
-            tool_name: 工具名称
-            tool_args: 工具参数
-            websocket_send_func: WebSocket 发送函数
-            
-        Returns:
-            工具执行结果，格式：{"content": "..."}，失败返回 None
-        """
-        try:
-            # 查找对应的工具
-            tool = None
-            for t in self._tools:
-                if t.name == tool_name:
-                    tool = t
-                    break
-            
-            if not tool:
-                logger.error(f"[Agent] 工具不存在: {tool_name}")
-                await websocket_send_func({
-                    "type": "error",
-                    "error": f"找不到工具: {tool_name}"
-                })
-                return None
-            
-            await websocket_send_func({
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "arguments": tool_args
-            })
-            
-            if hasattr(tool, "ainvoke"):
-                result = await tool.ainvoke(tool_args)
-            elif hasattr(tool, "invoke"):
-                result = tool.invoke(tool_args)
-            else:
-                raise ValueError(f"工具 {tool_name} 没有 invoke 或 ainvoke 方法")
-            
-            await websocket_send_func({
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "result": {
-                    "success": True,
-                    "content": str(result)
-                }
-            })
-            
-            return {"content": str(result)}
-            
-        except Exception as e:
-            logger.error(f"[Agent] 工具执行失败: {tool_name}: {e}")
-            await websocket_send_func({
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "result": {
-                    "success": False,
-                    "error": str(e)
-                }
-            })
-            return None
-
 
 def get_langgraph_agent_service() -> LangGraphAgentService:
     """便捷方法，获取 LangGraphAgentService 单例"""
